@@ -1,4 +1,4 @@
-# MicroShell v2.8
+# MicroShell v3.3 - Unrestricted Single-User Mode
 # A simple UNIX-like shell for MicroPython (ESP32/ESP8266)
 import uos
 import sys
@@ -6,8 +6,8 @@ import time
 import network
 import socket
 import machine
-import gc  # Added for memory management commands
-import micropython # Added for memory tracing
+import gc
+import micropython
 
 # --- Global State ---
 CURRENT_DIR = "/"
@@ -56,7 +56,6 @@ def resolve_path(path):
         resolved = '/' + '/'.join(p for p in parts if p)
         return resolved if resolved else '/'
 
-
     # Relative path from current directory
     if CURRENT_DIR == '/':
         return '/' + path
@@ -68,7 +67,8 @@ def rm_recursive(path):
     try:
         if uos.stat(path)[0] & 0x4000:  # Check if it's a directory
             for entry in uos.listdir(path):
-                sub_path = resolve_path(path + '/' + entry)
+                # Use resolve_path to handle nested path construction
+                sub_path = path + ('/' if not path.endswith('/') else '') + entry
                 rm_recursive(sub_path)
             uos.rmdir(path)
             print(f"Removed directory (recursive): {path}")
@@ -154,7 +154,7 @@ def format_size(size_bytes):
     else:
         return f"{size_bytes / (1024 * 1024):.2f} M"
 
-# --- WiFi Functions (omitted for brevity) ---
+# --- WiFi Functions ---
 
 def load_wifi_config():
     """Loads saved credentials from file."""
@@ -178,11 +178,13 @@ def save_wifi_config(ssid, password):
 
 def do_wifi_connect(args):
     """Connects to WiFi and saves credentials."""
-    if len(args) != 3:
+    # args should be ['wifi', 'connect', '<ssid>', '<password>'] (length 4)
+    if len(args) != 4:
         print("Usage: wifi connect <ssid> <password>")
+        print("Example: wifi connect MyNetwork MyPassword123")
         return
     
-    ssid, password = args[1], args[2]
+    ssid, password = args[2], args[3]
     sta_if = network.WLAN(network.STA_IF)
     
     if sta_if.isconnected() and sta_if.config('essid') == ssid:
@@ -205,7 +207,7 @@ def do_wifi_connect(args):
     if sta_if.isconnected():
         print("\nConnection successful!")
         do_wifi_status(None)
-        save_wifi_config(ssid, password)
+        save_wifi_config(ssid, password) 
     else:
         sta_if.active(False)
         print("\nConnection failed.")
@@ -269,7 +271,6 @@ def do_wifi(args):
         print("Usage: wifi <connect|status|scan|disconnect|clear>")
         return
     
-    command = args[0]
     sub_command = args[1]
 
     if sub_command == "connect":
@@ -291,30 +292,30 @@ def do_wifi(args):
 def do_help(args):
     """Displays command list."""
     print("--------------------------------------------------")
-    print("MicroShell Commands:")
+    print("MicroShell Commands (Unrestricted Root Access):")
     print("  help              - Display this list")
     print("  clear             - Clear the terminal screen")
     print("  ls [path]         - List directory contents")
-    print("  cd <dir>          - Change directory")
+    print("  cd <dir>          - Change directory (full access)")
     print("  pwd               - Print working directory")
     print("  cat <file>        - Display file content")
     print("  echo <text> > <file> - Write text to file (overwrite)")
     print("  mkdir <dir>       - Create directory")
     print("  rm <file/dir>     - Remove file or empty directory")
-    print("  rm -rf <dir>      - Remove directory recursively (USE WITH CAUTION)")
+    print("  rm -rf <dir>      - Remove directory recursively")
     print("  mv <src> <dest>   - Move/rename file or directory")
-    print("  cp <src> <dest>   - Copy file or directory (recursively)")
+    print("  cp <src> <dest>   - Copy file or directory")
     print("  du [path]         - Summarize disk usage of a directory or file")
-    print("  df [path]         - Display disk free space (total, used, free)")
+    print("  df [path]         - Display disk free space")
     print("  ps                - Display process status (memory/GC info)")
     print("  alias [name=cmd]  - Define, view, or remove command aliases")
-    print("  touch <file>      - Create empty file if it doesn't exist")
+    print("  touch <file>      - Create empty file if it's not exist")
     print("  edit <file>       - Open minimal line-based text editor")
     print("  exec <script>     - Execute commands from a script file")
-    print("  wifi [connect/status/scan/clear] - Manage WiFi connection")
-    print("  ping <host> [-t <seconds>] - Check network reachability (TCP)")
-    print("  reboot            - Restart the MicroPython device (hard reset)")
-    print("  exit              - Exit the MicroShell")
+    print("  wifi [...]        - Manage WiFi connection")
+    print("  ping <host> [-t]  - Check network reachability (TCP)")
+    print("  reboot            - Restart the MicroPython device")
+    print("  exit              - Exit the MicroShell to REPL")
     print("--------------------------------------------------")
 
 def do_clear(args):
@@ -370,6 +371,7 @@ def do_cat(args):
         return
     
     path = resolve_path(args[1])
+    
     try:
         with open(path, 'r') as f:
             while True:
@@ -406,6 +408,7 @@ def do_mkdir(args):
         return
     
     path = resolve_path(args[1])
+    
     try:
         uos.mkdir(path)
         print(f"Directory '{path}' created.")
@@ -444,8 +447,8 @@ def do_rm(args):
             print(f"Removed file: {path}")
 
     except OSError as e:
-        if is_dir and not recursive_force:
-            print(f"Error: Directory '{path}' is not empty. Use 'rm -rf' to force removal.")
+        if 'is not empty' in str(e): # MicroPython's OSError message for non-empty dir
+             print(f"Error: Directory '{path}' is not empty. Use 'rm -rf' to force removal.")
         else:
             print(f"Error removing '{path}': {e}")
 
@@ -473,7 +476,7 @@ def do_cp(args):
         if dest_stats[0] & 0x4000: # Destination is a directory
             # Construct the final path: /dest_path/source_filename
             src_filename = src_path.split('/')[-1]
-            if not src_filename: # Should only happen if copying '/' (root) which is prohibited
+            if not src_filename: 
                  print("Error: Cannot copy root directory.")
                  return
             
@@ -582,10 +585,6 @@ def do_alias(args):
             print("Usage: alias <name>=<command> or alias -u <name>")
             return
             
-        # Prevent aliasing 'alias' itself or critical commands like 'exit'
-        if name in COMMANDS and name not in ('exit', 'help', 'clear'): 
-            print(f"Warning: Aliasing reserved command '{name}'.")
-
         ALIASES[name] = cmd
         print(f"Alias set: {name} -> '{cmd}'")
     
@@ -620,6 +619,7 @@ def do_touch(args):
         return
     
     path = resolve_path(args[1])
+    
     try:
         # Check if file exists by trying to open for read
         uos.stat(path)
@@ -772,7 +772,7 @@ def do_exec(args):
                 if command.startswith('#') or not command:
                     continue # Ignore comments and empty lines
                 
-                print(f"[RUN] {command}")
+                print(f"[SCRIPT] > {command}")
                 # Important: Do not allow 'exit' within a script
                 if command.lower() == 'exit':
                     print("Warning: Command 'exit' ignored inside script execution.")
@@ -802,13 +802,14 @@ def do_ping(args):
     
     # Parse optional port and timeout flag
     try:
-        # Check if a specific port is provided
+        # Find numeric port after host, if present
         if len(args) > 2 and args[2].isdigit():
             port = int(args[2])
             
         # Check for timeout flag (-t)
         if '-t' in args:
             t_index = args.index('-t')
+            # Look up the value right after -t
             if t_index + 1 < len(args):
                 timeout = float(args[t_index + 1])
     except (ValueError, IndexError):
@@ -822,12 +823,19 @@ def do_ping(args):
     print(f"Pinging {host}:{port} with timeout {timeout:.1f}s...")
 
     try:
-        addr = socket.getaddrinfo(host, port)[0][-1]
+        # Resolve address info: (family, socktype, proto, canonname, sa_tuple)
+        # Using [0] to get the first result
+        addr_info = socket.getaddrinfo(host, port)[0]
+        addr = addr_info[-1] # sa_tuple = (ip_address, port)
+        ip_addr = addr[0] # Get the IP address string
+        
+        print(f"Resolved IP: {ip_addr}")
+
         s = socket.socket()
         s.settimeout(timeout)
         
         start_time = time.ticks_ms()
-        s.connect(addr)
+        s.connect(addr) # Connect using the sa_tuple
         rtt = time.ticks_diff(time.ticks_ms(), start_time)
         
         print(f"Connection successful! RTT: {rtt}ms")
@@ -867,7 +875,7 @@ COMMANDS = {
     'mv': do_mv,
     'cp': do_cp, 
     'du': do_du,
-    'df': do_df, # New
+    'df': do_df,
     'ps': do_ps,
     'alias': do_alias,
     'touch': do_touch,
@@ -875,7 +883,7 @@ COMMANDS = {
     'exec': do_exec,
     'wifi': do_wifi,
     'ping': do_ping,
-    'reboot': do_reboot, # Added reboot command
+    'reboot': do_reboot,
     'exit': do_exit,
 }
 
@@ -888,20 +896,25 @@ def parse_and_execute(command_line):
             return
 
         # 1. Check for alias expansion
-        first_word = command_line.split(None, 1)[0]
+        first_word_match = command_line.split(None, 1)
+        first_word = first_word_match[0] if first_word_match else ""
+
         if first_word in ALIASES:
             # Replace alias with the defined command, then continue parsing
+            # Use the alias command, followed by the rest of the original command line
             expanded_line = ALIASES[first_word] + command_line[len(first_word):]
-            print(f"[Alias Expanded] {expanded_line}")
+            if not IS_SCRIPTING: 
+                print(f"[Alias Expanded] {expanded_line}")
             command_line = expanded_line
             
-        # 2. Execute the (potentially expanded) command
+        # 2. Split the (potentially expanded) command line into parts
         parts = command_line.split()
         if not parts:
             return
 
         command = parts[0].lower()
         
+        # --- Command Execution ---
         if command in COMMANDS:
             COMMANDS[command](parts)
         else:
@@ -914,8 +927,8 @@ def parse_and_execute(command_line):
 def run_shell():
     """The main shell loop."""
     print("--------------------------------------------------")
-    print(f"MicroShell v2.8 on {sys.platform.upper()}")
-    print("Type 'help' for a list of commands.")
+    print(f"MicroShell v3.3 on {sys.platform.upper()} (Unrestricted Root Access)")
+    print("WARNING: All file operations are unrestricted.")
     print("--------------------------------------------------")
     
     # 1. Initialize WiFi interface
@@ -939,19 +952,19 @@ def run_shell():
             print("Auto-connect failed. Credentials stored but network unavailable.")
 
 
-    global SHELL_RUNNING
-    global CURRENT_DIR
+    global SHELL_RUNNING, CURRENT_DIR
     
     while SHELL_RUNNING:
         try:
-            prompt = f"MicroShell:{CURRENT_DIR}$ "
+            # Simplified prompt
+            prompt = f"MicroShell:{CURRENT_DIR} # "
+
             command_line = input(prompt)
             parse_and_execute(command_line)
 
         except KeyboardInterrupt:
             print("\nShell interrupted. Type 'exit' to quit.")
         except EOFError:
-            # Handle Ctrl+D (EOF), which also should exit
             do_exit(None)
         except Exception as e:
             # Catch all unexpected runtime errors in the loop
