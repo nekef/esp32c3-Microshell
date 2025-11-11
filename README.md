@@ -17,7 +17,7 @@
 - Built for the ESP32-C3 microcontroller.
 - Developed with [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/) (Espressif IoT Development Framework).
 - Works with [MicroPython](https://micropython.org/download/esp32c3/).
-- Easy flashing and file management using [Thonny IDE](https://thonny.org/) (recommended for beginners).
+
 
 ## Contributing
 
