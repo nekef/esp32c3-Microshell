@@ -313,10 +313,40 @@ def do_help(args):
     print("  edit <file>       - Open minimal line-based text editor")
     print("  exec <script>     - Execute commands from a script file")
     print("  wifi [...]        - Manage WiFi connection")
-    print("  ping <host> [-t]  - Check network reachability (TCP)")
+    print("  ping <host> [-c count] [-t timeout_s] - Check network reachability (TCP)")
+    print("  ifconfig          - Display network interface configuration (IP/MAC/RSSI)")
     print("  reboot            - Restart the MicroPython device")
     print("  exit              - Exit the MicroShell to REPL")
     print("--------------------------------------------------")
+
+def do_ifconfig(args):
+    """Displays detailed network interface information (similar to ifconfig)."""
+    sta_if = network.WLAN(network.STA_IF)
+    mac = ':'.join('{:02x}'.format(b) for b in sta_if.config('mac'))
+    
+    print("\neth0 (Wi-Fi Station Interface)")
+    print(f"  Link status: {'UP' if sta_if.isconnected() else 'DOWN'}")
+    print(f"  MAC address: {mac}")
+    
+    if sta_if.isconnected():
+        # (IP, Netmask, Gateway, DNS)
+        try:
+            ip, netmask, gw, dns = sta_if.ifconfig()
+            rssi = sta_if.status('rssi')
+            ssid = sta_if.config('essid')
+            
+            print(f"  SSID: {ssid}")
+            print(f"  IP Address: {ip}")
+            print(f"  Netmask: {netmask}")
+            print(f"  Gateway: {gw}")
+            print(f"  DNS: {dns}")
+            print(f"  Signal (RSSI): {rssi} dBm")
+        except Exception as e:
+            # Handle potential issue if status is connected but configuration retrieval fails
+            print(f"  Warning: Could not retrieve full IP configuration: {e}")
+    else:
+        print("  Status: Disconnected")
+    print("-" * 20)
 
 def do_clear(args):
     """Clears the console using ANSI escape codes."""
@@ -791,59 +821,141 @@ def do_exec(args):
 
 
 def do_ping(args):
-    """Pings a host using a TCP socket connection."""
+    """
+    Pings a host using a TCP socket connection (simulating ICMP).
+    Supports -c (count) and -t (timeout).
+    """
+    # Default parameters
+    host = None
+    port = 80 # Default TCP port for a simple connection check
+    count = 4 # Default to 4 packets (like Linux)
+    timeout = DEFAULT_PING_TIMEOUT # Default to 4.0 seconds
+
+    # Parsing arguments
     if len(args) < 2:
-        print("Usage: ping <host> [port] [-t <seconds>]")
+        print("Usage: ping <host> [-c <count>] [-t <timeout_s>]")
         return
-
-    host = args[1]
-    port = 80
-    timeout = DEFAULT_PING_TIMEOUT
     
-    # Parse optional port and timeout flag
-    try:
-        # Find numeric port after host, if present
-        if len(args) > 2 and args[2].isdigit():
-            port = int(args[2])
-            
-        # Check for timeout flag (-t)
-        if '-t' in args:
-            t_index = args.index('-t')
-            # Look up the value right after -t
-            if t_index + 1 < len(args):
-                timeout = float(args[t_index + 1])
-    except (ValueError, IndexError):
-        print("Invalid port or timeout value.")
+    # Simple argument parsing loop to handle flags and positional arguments
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg == '-c' and i + 1 < len(args):
+            try:
+                count = int(args[i+1])
+                i += 1
+            except ValueError:
+                print("Invalid count value for -c.")
+                return
+        elif arg == '-t' and i + 1 < len(args):
+            try:
+                timeout = float(args[i+1])
+                i += 1
+            except ValueError:
+                print("Invalid timeout value for -t.")
+                return
+        elif not host:
+            host = arg
+        else:
+            # Assume any remaining argument after host is a port number
+            try:
+                port_check = int(arg)
+                if port_check > 0 and port_check < 65536:
+                    port = port_check
+                else:
+                    print(f"Unknown argument: {arg}")
+                    return
+            except ValueError:
+                print(f"Unknown argument: {arg}")
+                return
+        i += 1
+        
+    if not host:
+        print("Error: Hostname is required.")
+        print("Usage: ping <host> [-c <count>] [-t <timeout_s>]")
         return
 
-    if not network.WLAN(network.STA_IF).isconnected():
+    # Network check
+    sta_if = network.WLAN(network.STA_IF)
+    if not sta_if.isconnected():
         print("Error: Not connected to WiFi. Use 'wifi connect' first.")
         return
-
-    print(f"Pinging {host}:{port} with timeout {timeout:.1f}s...")
-
+        
+    # --- Ping Execution ---
+    
+    rtts = []
+    packets_sent = 0
+    packets_received = 0
+    
+    # 1. Resolve IP address first
     try:
         # Resolve address info: (family, socktype, proto, canonname, sa_tuple)
-        # Using [0] to get the first result
         addr_info = socket.getaddrinfo(host, port)[0]
         addr = addr_info[-1] # sa_tuple = (ip_address, port)
         ip_addr = addr[0] # Get the IP address string
-        
-        print(f"Resolved IP: {ip_addr}")
-
-        s = socket.socket()
-        s.settimeout(timeout)
-        
-        start_time = time.ticks_ms()
-        s.connect(addr) # Connect using the sa_tuple
-        rtt = time.ticks_diff(time.ticks_ms(), start_time)
-        
-        print(f"Connection successful! RTT: {rtt}ms")
-        s.close()
     except OSError as e:
-        print(f"Ping failed: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"ping: cannot resolve {host}: Name or service not known ({e})")
+        return
+    
+    print(f"PING {host} ({ip_addr}): TCP port {port} check") # Mimic ping start line
+    
+    for seq in range(1, count + 1):
+        packets_sent += 1
+        s = None
+        try:
+            s = socket.socket()
+            s.settimeout(timeout)
+            
+            start_time = time.ticks_ms()
+            s.connect(addr) # Connect using the sa_tuple
+            rtt = time.ticks_diff(time.ticks_ms(), start_time)
+            
+            # Simulated ICMP data size and TTL for Linux style output
+            SIMULATED_DATA_BYTES = 64
+            SIMULATED_TTL = 64 
+
+            # Mimic Linux ping output format
+            print(f"{SIMULATED_DATA_BYTES} bytes from {ip_addr}: icmp_seq={seq} ttl={SIMULATED_TTL} time={rtt} ms")
+            
+            packets_received += 1
+            rtts.append(rtt)
+            s.close()
+
+        except OSError as e:
+            # Specific check for timeout error (errno 110 in MicroPython often means timeout)
+            if e.args[0] == 110: 
+                print(f"Request timeout for icmp_seq {seq}")
+            else:
+                print(f"Error for icmp_seq {seq}: {e}")
+            if s:
+                s.close()
+        except Exception as e:
+            print(f"An unexpected error occurred for seq {seq}: {e}")
+            if s:
+                s.close()
+
+        # Pause between pings (1 second interval like Linux)
+        time.sleep(1)
+
+    # --- Summary Statistics ---
+    print(f"\n--- {host} ping statistics ---")
+    loss = 0.0
+    if packets_sent > 0:
+        loss = ((packets_sent - packets_received) / packets_sent) * 100.0
+
+    print(f"{packets_sent} packets transmitted, {packets_received} received, {loss:.1f}% packet loss")
+    
+    if rtts:
+        min_rtt = min(rtts)
+        max_rtt = max(rtts)
+        avg_rtt = sum(rtts) / len(rtts)
+        
+        # Calculate mean deviation (a simple substitute for standard deviation, mdev)
+        mdev = (sum(abs(r - avg_rtt) for r in rtts) / len(rtts))
+        
+        # Mimic Linux RTT statistics format
+        print(f"rtt min/avg/max/mdev = {min_rtt:.3f}/{avg_rtt:.3f}/{max_rtt:.3f}/{mdev:.3f} ms")
+    print("\n")
 
 def do_reboot(args):
     """Reboots the device (hard reset)."""
@@ -883,6 +995,7 @@ COMMANDS = {
     'exec': do_exec,
     'wifi': do_wifi,
     'ping': do_ping,
+    'ifconfig': do_ifconfig, # <-- New Command
     'reboot': do_reboot,
     'exit': do_exit,
 }
