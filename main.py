@@ -292,7 +292,7 @@ def do_wifi(args):
 def do_help(args):
     """Displays command list."""
     print("--------------------------------------------------")
-    print("MicroShell Commands (Unrestricted Root Access):")
+    print("MicroShell Commands (Unrestricted Single-User Access):")
     print("  help              - Display this list")
     print("  clear             - Clear the terminal screen")
     print("  ls [path]         - List directory contents")
@@ -324,7 +324,8 @@ def do_ifconfig(args):
     sta_if = network.WLAN(network.STA_IF)
     mac = ':'.join('{:02x}'.format(b) for b in sta_if.config('mac'))
     
-    print("\neth0 (Wi-Fi Station Interface)")
+    # Updated: Using wlan0, the standard name for the first wireless interface
+    print("\nwlan0 (Wi-Fi Station Interface)")
     print(f"  Link status: {'UP' if sta_if.isconnected() else 'DOWN'}")
     print(f"  MAC address: {mac}")
     
