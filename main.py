@@ -1,4 +1,4 @@
-# MicroShell v4.5 - Stable Single-Command Mode
+# MicroShell v4.7 - Stable Single-Command Mode
 # A simple UNIX-like shell for MicroPython (ESP32/ESP8266)
 import uos
 import sys
@@ -20,7 +20,7 @@ ENV = {
     "USER": "micropython",
     "HOME": "/",
     "PATH": "/bin:/usr/bin",
-    "VERSION": "4.5" # Updated version
+    "VERSION": "4.7" # Updated version
 } 
 
 # --- Network Configuration ---
@@ -219,7 +219,7 @@ def initialize_filesystem():
     print("-------------------------------------------\n")
 
 
-# --- WiFi Functions (Omitted for brevity) ---
+# --- WiFi Functions ---
 def load_wifi_config():
     """Loads saved credentials from file."""
     try:
@@ -241,12 +241,20 @@ def save_wifi_config(ssid, password):
         print(f"Error saving config: {e}")
 
 def do_wifi_connect(args):
-    """Connects to WiFi and saves credentials."""
-    if len(args) != 4:
-        print("Usage: wifi connect <ssid> <password>")
+    """
+    Connects to WiFi and saves credentials. 
+    Accepts 3 args (open network: <ssid>) or 4 args (secured network: <ssid> <password>).
+    """
+    # Check for 4 arguments (secured) or 3 arguments (open)
+    if len(args) < 3 or len(args) > 4:
+        print("Usage: wifi connect <ssid> [password]")
+        print("  Note: Omit the password for open networks.")
         return
     
-    ssid, password = args[2], args[3]
+    ssid = args[2]
+    # If only 3 arguments, the password is an empty string (open network)
+    password = args[3] if len(args) == 4 else "" 
+
     sta_if = network.WLAN(network.STA_IF)
     
     if sta_if.isconnected() and sta_if.config('essid') == ssid:
@@ -255,7 +263,8 @@ def do_wifi_connect(args):
 
     print(f"Attempting to connect to '{ssid}'...")
     sta_if.active(True)
-    sta_if.connect(ssid, password)
+    # Pass the determined password (which may be "" for open networks)
+    sta_if.connect(ssid, password) 
 
     max_wait = 15
     while max_wait > 0:
@@ -311,7 +320,8 @@ def do_wifi_scan(args):
 
 def do_wifi_disconnect(args):
     """Disconnects WiFi."""
-    sta_if = network.WLAN(network.WLAN_STA)
+    # FIX: Changed network.WLAN_STA (which caused the error) to network.STA_IF
+    sta_if = network.WLAN(network.STA_IF)
     if sta_if.isconnected():
         sta_if.disconnect()
         print("Disconnected.")
@@ -375,7 +385,11 @@ def do_help(args):
     print("  touch <file>      - Create empty file if it's not exist")
     print("  edit <file>       - Open minimal line-based text editor")
     print("  exec <script>     - Execute commands from a script file")
-    print("  wifi [...]        - Manage WiFi connection")
+    print("  wifi connect <ssid> [password] - Connect to WiFi (omit password for open networks)")
+    print("  wifi status       - Check current WiFi status")
+    print("  wifi scan         - Scan for available networks")
+    print("  wifi disconnect   - Disconnect from current network")
+    print("  wifi clear        - Clear saved WiFi credentials")
     print("  ping <host> [...] - Check network reachability (TCP)")
     print("  curl <url>        - Fetch content from a URL via HTTP/HTTPS GET")
     print("  ifconfig          - Display network interface configuration (IP/MAC/RSSI)")
